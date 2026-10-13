@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Group Line-Up 3D</title>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#eceff8;--ink:#1c2040;--card:#fff;--line:#c9cfe6;--acc:#ff7a1a;--mut:#5d6488;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#13162b;--ink:#eef0ff;--card:#1f2340;--line:#363c68;--mut:#a4abd6}}
+:root[data-theme="dark"]{--bg:#13162b;--ink:#eef0ff;--card:#1f2340;--line:#363c68;--mut:#a4abd6}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--ink);font-family:'Bricolage Grotesque',system-ui,sans-serif;overflow:hidden}
+#app{display:flex;flex-direction:column;height:100%}
+#hud{display:flex;gap:10px;justify-content:space-between;align-items:center;padding:8px 12px;flex-wrap:wrap}
+#hud b{font-size:18px}
+#stage{flex:1;min-height:0}
+#stage canvas{display:block;width:100%;height:100%;touch-action:none}
+#hint{padding:6px 12px;font-size:14px;color:var(--mut);text-align:center;min-height:20px}
+#bar{display:flex;gap:8px;padding:6px 12px 12px;justify-content:center;flex-wrap:wrap}
+button{font:inherit;font-weight:700;border:2px solid var(--line);background:var(--card);color:var(--ink);border-radius:12px;padding:10px 16px;cursor:pointer}
+button.pri{background:var(--acc);border-color:var(--acc);color:#1c1000}
+button:disabled{opacity:.45;cursor:default}
+button:focus-visible{outline:3px solid var(--acc);outline-offset:2px}
+#ov{position:fixed;inset:0;background:rgba(10,12,30,.6);display:flex;align-items:center;justify-content:center;padding:16px;z-index:5}
+#ov.hide{display:none}
+#card{background:var(--card);border:2px solid var(--line);border-radius:18px;padding:22px;max-width:480px;max-height:90%;overflow:auto;line-height:1.45}
+#card h1{margin:0 0 6px;font-size:28px}#card h2{margin:0 0 8px}
+#card ul{margin:6px 0 12px;padding-left:20px}
+#card table{width:100%;border-collapse:collapse;margin:10px 0}
+#card td{padding:6px 4px;border-bottom:1px solid var(--line)}
+</style></head><body>
+<div id="app">
+<div id="hud"><b id="cat">Group Line-Up</b><span id="ends"></span><b id="tm"></b></div>
+<div id="stage"></div>
+<div id="hint"></div>
+<div id="bar"><button id="peek">👀 Peek all (+10s)</button><button id="done" class="pri">👏 We're lined up!</button></div>
+</div>
+<div id="ov"><div id="card"></div></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const N=12,SP=1.05;
+const CATS=[{k:'Birthday month',lo:'January',hi:'December',b:60},{k:'Years in the company',lo:'newest hire',hi:'longest serving',b:70},{k:'Distance travelled to the venue',lo:'nearest',hi:'farthest',b:70},{k:'Height',lo:'shortest',hi:'tallest',b:35,vis:1}];
+const RIV=['Orange','Teal','Violet'];
+let round=0,P=[],slots=[],sel=-1,phase='intro',t=0,peeked=0,tot={};
+const $=id=>document.getElementById(id),clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const dark=matchMedia('(prefers-color-scheme: dark)').matches;
+const stage=$('stage'),R=new THREE.WebGLRenderer({antialias:true});
+R.setPixelRatio(Math.min(devicePixelRatio,2));stage.appendChild(R.domElement);
+const cv=R.domElement,scene=new THREE.Scene();scene.background=new THREE.Color(dark?0x13162b:0xeceff8);
+const cam=new THREE.PerspectiveCamera(45,1,.1,100);let yaw=0,pitch=.35,dist=11;const tgt=new THREE.Vector3(0,1,0);
+scene.add(new THREE.HemisphereLight(0xffffff,0x6670a0,.9));
+const dl=new THREE.DirectionalLight(0xffffff,.8);dl.position.set(4,8,6);scene.add(dl);
+const fl=new THREE.Mesh(new THREE.CylinderGeometry(9,9,.2,48),new THREE.MeshStandardMaterial({color:dark?0x2a3058:0xd7dcf3}));fl.position.y=-.1;scene.add(fl);
+const lineM=new THREE.MeshStandardMaterial({color:0xff7a1a});
+for(let i=0;i<N;i++){const m=new THREE.Mesh(new THREE.BoxGeometry(.7,.02,.12),lineM);m.position.set((i-5.5)*SP,.01,.55);scene.add(m)}
+function rs(){const w=stage.clientWidth,h=stage.clientHeight;if(!w||!h)return;R.setSize(w,h);cam.aspect=w/h;cam.updateProjectionMatrix();dist=Math.max(dist,w/h<1?20:11)}
+new ResizeObserver(rs).observe(stage);rs();
+
+const shirt=[0xe76f51,0x2a9d8f,0xe9c46a,0x6d83f2,0xd66ba0,0x4cc9f0,0x90be6d,0xf4a261,0x9b5de5,0x00bbf9,0xf15bb5,0x7bd389];
+const mat=c=>new THREE.MeshStandardMaterial({color:c});
+const ringG=new THREE.RingGeometry(.36,.5,32);
+function mkPerson(i){const g=new THREE.Group(),add=(m,x,y,z)=>{m.position.set(x,y,z);g.add(m);return m};
+ add(new THREE.Mesh(new THREE.CylinderGeometry(.18,.18,.3,12),mat(0x333a5c)),0,.15,0);
+ add(new THREE.Mesh(new THREE.CylinderGeometry(.22,.28,.9,14),mat(shirt[i])),0,.75,0);
+ add(new THREE.Mesh(new THREE.SphereGeometry(.2,16,16),mat(0xf1c9a5)),0,1.43,0);
+ const eg=new THREE.SphereGeometry(.03,8,8),em=mat(0x222222);add(new THREE.Mesh(eg,em),-.07,1.46,.18);add(new THREE.Mesh(eg,em),.07,1.46,.18);
+ const arm=new THREE.Group();arm.position.set(.3,1.15,0);const a=new THREE.Mesh(new THREE.CylinderGeometry(.05,.05,.55,8),mat(0xf1c9a5));a.position.y=-.27;arm.add(a);g.add(arm);
+ const la=new THREE.Mesh(new THREE.CylinderGeometry(.05,.05,.5,8),mat(0xf1c9a5));add(la,-.3,.9,0);
+ const ring=new THREE.Mesh(ringG,new THREE.MeshBasicMaterial({color:0xffd23f,side:THREE.DoubleSide}));ring.rotation.x=-Math.PI/2;ring.position.y=.03;ring.visible=false;g.add(ring);
+ g.traverse(o=>o.userData.i=i);scene.add(g);
+ return{g,arm,ring,v:0,s:i,x:0,bub:null,bt:0,raise:0}}
+for(let i=0;i<N;i++)P.push(mkPerson(i));
+
+function bubble(p,v){if(p.bub){scene.remove(p.bub)}
+ const c=document.createElement('canvas');c.width=256;c.height=128;const x=c.getContext('2d');
+ x.fillStyle='#fff';x.strokeStyle='#ff7a1a';x.lineWidth=6;x.beginPath();x.roundRect?x.roundRect(6,6,244,100,24):x.rect(6,6,244,100);x.fill();x.stroke();
+ const F=['','☝️','✌️','🤟','🖖'];x.font='58px sans-serif';x.textAlign='center';x.textBaseline='middle';x.fillStyle='#000';
+ x.fillText('🖐'.repeat(v/5|0)+F[v%5],128,58);
+ const s=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(c),depthTest:false}));s.scale.set(1.4,.7,1);s.renderOrder=9;scene.add(s);p.bub=s;p.bt=5}
+function newRound(){const c=CATS[round];$('cat').textContent=c.k;$('ends').textContent='Left: '+c.lo+'  →  Right: '+c.hi;
+ const v=[...Array(N).keys()].map(i=>i+1);for(let i=N-1;i>0;i--){const j=Math.random()*(i+1)|0;[v[i],v[j]]=[v[j],v[i]]}
+ P.forEach((p,i)=>{p.v=v[i];p.s=i;p.x=(i-5.5)*SP;p.g.position.set(p.x,0,0);p.g.scale.y=c.vis?.85+v[i]*.05:1;p.ring.visible=false;p.raise=0;p.bt=0;if(p.bub){scene.remove(p.bub);p.bub=null}});
+ sel=-1;t=0;peeked=0;$('peek').disabled=!!c.vis;$('peek').style.display=c.vis?'none':'';
+ $('hint').textContent=c.vis?'🤫 No talking! Compare heights and swap people.':'🤫 No talking! Tap a person to see their gesture, then tap another to swap places.'}
+function begin(){$('ov').classList.add('hide');newRound();phase='play'}
+function roundCard(){phase='ready';const c=CATS[round];
+ $('card').innerHTML=`<h2>Round ${round+1} of 4: ${c.k}</h2><p>Line up from <b>${c.lo}</b> (left) to <b>${c.hi}</b> (right). No talking, gestures only.</p>
+ ${c.vis?'<p>Heights are visible, so look closely.</p>':'<p>Tap a person and they gesture a number: <b>🖐 = 5</b>, plus fingers for the rest. Gesture 1 means '+c.lo+'.</p>'}
+ <p>Each wrong check adds 5 seconds. Fastest correct team wins the round.</p><button class="pri" onclick="begin()">Start the clock</button>`;
+ $('ov').classList.remove('hide')}
+function intro(){phase='intro';round=0;tot={You:0,Orange:0,Teal:0,Violet:0};newRound();phase='intro';$('cat').textContent='Group Line-Up';$('ends').textContent='';
+ $('card').innerHTML=`<h1>🤫 Group Line-Up</h1><p>Your team of 12 must line up in order without a single word. Anyone can lead, and a quiet intern's gesture counts the same as the CEO's.</p>
+ <ul><li>4 rounds: birthday month, years in the company, distance travelled, height</li><li>Gestures only: fingers show numbers</li><li>Race 3 rival teams for the fastest correct line</li></ul>
+ <button class="pri" onclick="roundCard()">Play</button>`;$('ov').classList.remove('hide')}
+
+function swap(a,b){const A=P[a],B=P[b];[A.s,B.s]=[B.s,A.s]}
+function setSel(i){sel=i;P.forEach((p,k)=>{p.ring.material.color.set(0xffd23f);p.ring.visible=k===i})}
+const rc=new THREE.Raycaster(),ptr=new Map();let moved=0;
+cv.addEventListener('pointerdown',e=>{cv.setPointerCapture(e.pointerId);ptr.set(e.pointerId,[e.clientX,e.clientY]);moved=0});
+cv.addEventListener('pointermove',e=>{if(!ptr.has(e.pointerId))return;const o=ptr.get(e.pointerId),n=[e.clientX,e.clientY];
+ if(ptr.size===2){const ot=[...ptr.entries()].find(([k])=>k!==e.pointerId)[1];dist=clamp(dist*Math.hypot(o[0]-ot[0],o[1]-ot[1])/Math.max(1,Math.hypot(n[0]-ot[0],n[1]-ot[1])),5,24);moved=99}
+ else{yaw=clamp(yaw-(n[0]-o[0])*.006,-1.2,1.2);pitch=clamp(pitch+(n[1]-o[1])*.005,.1,1.2);moved+=Math.abs(n[0]-o[0])+Math.abs(n[1]-o[1])}
+ ptr.set(e.pointerId,n)});
+cv.addEventListener('pointerup',e=>{ptr.delete(e.pointerId);if(moved<6&&ptr.size===0)pick(e)});
+cv.addEventListener('pointercancel',e=>ptr.delete(e.pointerId));
+cv.addEventListener('wheel',e=>{e.preventDefault();dist=clamp(dist*(1+e.deltaY*.001),5,24)},{passive:false});
+function pick(e){if(phase!=='play')return;const r=cv.getBoundingClientRect();
+ rc.setFromCamera(new THREE.Vector2((e.clientX-r.left)/r.width*2-1,-(e.clientY-r.top)/r.height*2+1),cam);
+ const h=rc.intersectObjects(P.map(p=>p.g),true)[0];if(!h){setSel(-1);return}
+ const i=h.object.userData.i,p=P[i];
+ if(sel>=0&&sel!==i){swap(sel,i);setSel(-1);return}
+ if(sel===i){setSel(-1);return}
+ setSel(i);if(!CATS[round].vis){bubble(p,p.v)}}
+$('peek').onclick=()=>{if(phase!=='play'||peeked)return;peeked=1;t+=10;$('peek').disabled=true;P.forEach(p=>bubble(p,p.v))};
+$('done').onclick=()=>{if(phase!=='play')return;let bad=0;
+ P.forEach(p=>{const ok=p.v===p.s+1;if(!ok)bad++;p.ring.material.color.set(ok?0x3fcf6e:0xff4d4d);p.ring.visible=true});sel=-1;
+ if(!bad){phase='win';$('hint').textContent='🎉 Perfect line!';setTimeout(result,2200)}
+ else{t+=5;$('hint').textContent='❌ '+bad+' in the wrong spot (+5s). Red rings are wrong.';setTimeout(()=>{if(phase==='play')P.forEach(p=>p.ring.visible=false)},2500)}};
+function result(){phase='result';const c=CATS[round],me=Math.round(t);
+ const rows=[{n:'You',t:me}].concat(RIV.map(n=>({n,t:Math.round(c.b*(.6+Math.random()*.9))}))).sort((a,b)=>a.t-b.t);
+ rows.forEach((r,i)=>tot[r.n]+=3-i);const last=round===3;
+ $('card').innerHTML=`<h2>${rows[0].n==='You'?'🏆 You won the round!':'Round done: '+rows[0].n+' was fastest'}</h2>
+ <table>${rows.map((r,i)=>`<tr><td>${i+1}</td><td><b>${r.n==='You'?'Your team':r.n}</b></td><td>${r.t}s</td><td>+${3-i}</td></tr>`).join('')}</table>
+ <button class="pri" onclick="${last?'final()':'round++;roundCard()'}">${last?'Final scores':'Next round'}</button>`;
+ $('ov').classList.remove('hide')}
+function final(){phase='final';const s=Object.entries(tot).sort((a,b)=>b[1]-a[1]);
+ $('card').innerHTML=`<h2>Final scores</h2><table>${s.map(([n,p],i)=>`<tr><td>${['🥇','🥈','🥉','4'][i]}</td><td><b>${n==='You'?'Your team':n}</b></td><td>${p} pts</td></tr>`).join('')}</table>
+ <b>Talk about it</b><ul><li>Who started leading, and was it the most senior person?</li><li>How did you agree on gestures without words?</li><li>What would you change next time?</li></ul><button class="pri" onclick="intro()">Play again</button>`}
+
+let last=performance.now();
+function loop(now){requestAnimationFrame(loop);const dt=Math.min(.1,(now-last)/1000);last=now;
+ if(phase==='play')t+=dt;
+ $('tm').textContent=(phase==='play'||phase==='win')?'⏱ '+Math.floor(t/60)+':'+String(Math.floor(t%60)).padStart(2,'0'):'';
+ P.forEach((p,i)=>{const tx=(p.s-5.5)*SP;p.x+=(tx-p.x)*Math.min(1,dt*9);p.g.position.x=p.x;
+  let y=Math.min(.4,Math.abs(tx-p.x)*.35);if(phase==='win')y=Math.abs(Math.sin(now/200+i))*.3;p.g.position.y=y;
+  if(p.bt>0){p.bt-=dt;if(p.bt<=0&&p.bub){scene.remove(p.bub);p.bub=null}}
+  p.raise+=((p.bub?2.8:0)-p.raise)*Math.min(1,dt*10);p.arm.rotation.z=p.raise;
+  if(p.bub)p.bub.position.set(p.x,1.45*p.g.scale.y+.9,0)});
+ cam.position.set(tgt.x+Math.sin(yaw)*Math.cos(pitch)*dist,tgt.y+Math.sin(pitch)*dist,Math.cos(yaw)*Math.cos(pitch)*dist);cam.lookAt(tgt);
+ R.render(scene,cam)}
+requestAnimationFrame(loop);intro();
+</script></body></html>
